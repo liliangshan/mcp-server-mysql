@@ -42,6 +42,8 @@ export MYSQL_USER=root
 export MYSQL_PASSWORD=your_password
 export MYSQL_DATABASE=your_database
 export ALLOW_DDL=true
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
 ```
 
 ## Usage
@@ -95,7 +97,9 @@ npm run dev
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
-        "ALLOW_DDL": "true"
+        "ALLOW_DDL": "false",
+        "ALLOW_DROP": "false",
+        "ALLOW_DELETE": "false"
       }
     }
   }
@@ -113,13 +117,16 @@ npm run dev
     "mysql": {
       "command": "npx",
       "args": ["@liangshanli/mcp-server-mysql"],
+      "args": ["@liangshanli/mcp-server-mysql"],
       "env": {
         "MYSQL_HOST": "your_host",
         "MYSQL_PORT": "3306",
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
-        "ALLOW_DDL": "true"
+        "ALLOW_DDL": "false",
+        "ALLOW_DROP": "false",
+        "ALLOW_DELETE": "false"
       }
     }
   }
@@ -213,7 +220,9 @@ Logged content:
 | MYSQL_USER | root | MySQL username |
 | MYSQL_PASSWORD | | MySQL password |
 | MYSQL_DATABASE | | Database name |
-| ALLOW_DDL | true | Whether to allow DDL operations |
+| ALLOW_DDL | false | Whether to allow DDL operations (CREATE, ALTER, TRUNCATE, RENAME, COMMENT). Set to 'true' to enable |
+| ALLOW_DROP | false | Whether to allow DROP operations. Set to 'true' to enable |
+| ALLOW_DELETE | false | Whether to allow DELETE operations. Set to 'true' to enable |
 | MCP_LOG_DIR | ./logs | Log directory |
 | MCP_LOG_FILE | mcp-mysql.log | Log filename |
 
@@ -248,7 +257,32 @@ export MYSQL_PORT=3306
 export MYSQL_USER=root
 export MYSQL_PASSWORD=your_password
 export MYSQL_DATABASE=your_database
+export ALLOW_DDL=false
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+```
+
+**Permission Control Examples:**
+```bash
+# Default: Disable all destructive operations (safe mode)
+export ALLOW_DDL=false
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+
+# Allow DDL but disable DROP and DELETE
 export ALLOW_DDL=true
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+
+# Allow everything except DELETE
+export ALLOW_DDL=true
+export ALLOW_DROP=true
+export ALLOW_DELETE=false
+
+# Enable all operations (use with caution)
+export ALLOW_DDL=true
+export ALLOW_DROP=true
+export ALLOW_DELETE=true
 ```
 
 ### 3. Run Server

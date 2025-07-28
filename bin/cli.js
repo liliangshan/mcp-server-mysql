@@ -58,39 +58,81 @@ if (!fs.existsSync(serverPath)) {
 
 writeLog('INFO', `Starting MCP MySQL server from: ${serverPath}`);
 
-// Start MCP server
-const env = {
-  ...process.env,
-  // Ensure environment variables are passed
-  MYSQL_HOST: process.env.MYSQL_HOST || 'localhost',
-  MYSQL_PORT: process.env.MYSQL_PORT || '3306',
-  MYSQL_USER: process.env.MYSQL_USER || 'root',
-  MYSQL_PASSWORD: process.env.MYSQL_PASSWORD || '',
-  MYSQL_DATABASE: process.env.MYSQL_DATABASE || '',
-  ALLOW_DDL: process.env.ALLOW_DDL || 'true',
-  MCP_LOG_DIR: process.env.MCP_LOG_DIR || './logs',
-  MCP_LOG_FILE: process.env.MCP_LOG_FILE || 'mcp-mysql.log',
-};
 
-writeLog('INFO', 'Starting MCP MySQL server with environment:', {
-  MYSQL_HOST: env.MYSQL_HOST,
-  MYSQL_PORT: env.MYSQL_PORT,
-  MYSQL_USER: env.MYSQL_USER,
-  MYSQL_DATABASE: env.MYSQL_DATABASE,
-  ALLOW_DDL: env.ALLOW_DDL
-});
 
-const server = spawn('node', [serverPath], {
-  stdio: ['inherit', 'inherit', 'inherit'],
-  env: env
-});
+let server = null;
 
-writeLog('INFO', `MCP MySQL server process started with PID: ${server.pid}`);
+// Function to start server
+function startServer() {
+  // Create environment object
+  const env = {
+    ...process.env,
+    // Ensure environment variables are passed
+    MYSQL_HOST: process.env.MYSQL_HOST || 'localhost',
+    MYSQL_PORT: process.env.MYSQL_PORT || '3306',
+    MYSQL_USER: process.env.MYSQL_USER || 'root',
+    MYSQL_PASSWORD: process.env.MYSQL_PASSWORD || '',
+    MYSQL_DATABASE: process.env.MYSQL_DATABASE || '',
+    MCP_LOG_DIR: process.env.MCP_LOG_DIR || './logs',
+    MCP_LOG_FILE: process.env.MCP_LOG_FILE || 'mcp-mysql.log',
+  };
+
+  writeLog('INFO', 'Starting MCP MySQL server with environment:', {
+    MYSQL_HOST: env.MYSQL_HOST,
+    MYSQL_PORT: env.MYSQL_PORT,
+    MYSQL_USER: env.MYSQL_USER,
+    MYSQL_DATABASE: env.MYSQL_DATABASE,
+    ALLOW_DDL: process.env.ALLOW_DDL,
+    ALLOW_DROP: process.env.ALLOW_DROP,
+    ALLOW_DELETE: process.env.ALLOW_DELETE
+  });
+
+  server = spawn('node', [serverPath], {
+    stdio: ['inherit', 'inherit', 'inherit'],
+    env: env
+  });
+
+  writeLog('INFO', `MCP MySQL server process started with PID: ${server.pid}`);
+
+  // Add signal handling debug info
+  writeLog('INFO', 'Signal handlers registered for SIGINT and SIGTERM');
+  writeLog('INFO', 'Press Ctrl+C to gracefully shutdown the server');
+  
+}
+
+// Start the server
+startServer();
 
 // Handle process exit
 server.on('close', (code) => {
   writeLog('INFO', `MCP MySQL server exited with code: ${code}`);
-  process.exit(code);
+  // Clear any pending shutdown timeout
+  if (global.shutdownTimeout) {
+    clearTimeout(global.shutdownTimeout);
+  }
+  
+  // Check if this is a restart request
+  if (code === 0) {
+    writeLog('INFO', 'Server requested restart, restarting...');
+    setTimeout(() => {
+      startServer();
+    }, 2000); // Wait 2 seconds before restart
+  } else {
+    // Exit CLI process when server exits with error
+    setTimeout(() => {
+      writeLog('INFO', 'CLI process exiting after server shutdown');
+      process.exit(code);
+    }, 1000);
+  }
+});
+
+// Handle server error
+server.on('error', (err) => {
+  writeLog('ERROR', 'Server process error:', {
+    error: err.message,
+    stack: err.stack
+  });
+  process.exit(1);
 });
 
 // Handle errors
@@ -105,13 +147,89 @@ server.on('error', (err) => {
 // Handle signals
 process.on('SIGINT', () => {
   writeLog('INFO', 'Received SIGINT, shutting down server...');
-  server.kill('SIGINT');
+  gracefulShutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
   writeLog('INFO', 'Received SIGTERM, shutting down server...');
-  server.kill('SIGTERM');
+  gracefulShutdown('SIGTERM');
 });
+
+// Handle Windows specific signals
+process.on('SIGBREAK', () => {
+  writeLog('INFO', 'Received SIGBREAK, shutting down server...');
+  gracefulShutdown('SIGTERM');
+});
+
+// Handle restart signal from server
+process.on('SIGUSR1', () => {
+  writeLog('INFO', 'Received restart signal from server...');
+  restartServer();
+});
+
+// Handle process exit
+process.on('exit', (code) => {
+  writeLog('INFO', `CLI process exiting with code: ${code}`);
+});
+
+// Graceful shutdown function
+function gracefulShutdown(signal) {
+  // Set a timeout to force exit if server doesn't respond
+  global.shutdownTimeout = setTimeout(() => {
+    writeLog('WARN', 'Server shutdown timeout, forcing exit...');
+    try {
+      if (server) {
+        server.kill('SIGKILL');
+      }
+    } catch (err) {
+      writeLog('ERROR', 'Failed to force kill server:', {
+        error: err.message
+      });
+    }
+    process.exit(1);
+  }, 10000); // 10 seconds timeout
+  
+  // Try graceful shutdown
+  try {
+    if (server) {
+      server.kill(signal);
+      writeLog('INFO', `Sent ${signal} signal to server process ${server.pid}`);
+    } else {
+      writeLog('WARN', 'No server process to shutdown');
+      process.exit(0);
+    }
+  } catch (err) {
+    writeLog('ERROR', `Failed to send ${signal} signal to server:`, {
+      error: err.message
+    });
+    if (global.shutdownTimeout) {
+      clearTimeout(global.shutdownTimeout);
+    }
+    process.exit(1);
+  }
+}
+
+// Restart server function
+function restartServer() {
+  writeLog('INFO', 'Restarting MCP server...');
+  if (server) {
+    try {
+      server.kill('SIGTERM');
+      setTimeout(() => {
+        if (server && !server.killed) {
+          writeLog('WARN', 'Server not responding to SIGTERM, forcing kill...');
+          server.kill('SIGKILL');
+        }
+        startServer();
+      }, 3000); // Wait 3 seconds for graceful shutdown
+    } catch (err) {
+      writeLog('ERROR', 'Failed to stop server for restart:', { error: err.message });
+      startServer();
+    }
+  } else {
+    startServer();
+  }
+}
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {

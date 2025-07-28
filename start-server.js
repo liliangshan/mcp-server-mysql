@@ -27,7 +27,6 @@ class ServerManager {
       MYSQL_USER: process.env.MYSQL_USER || 'root',
       MYSQL_PASSWORD: process.env.MYSQL_PASSWORD || '',
       MYSQL_DATABASE: process.env.MYSQL_DATABASE || '',
-      ALLOW_DDL: process.env.ALLOW_DDL || 'true',
       MCP_LOG_DIR: process.env.MCP_LOG_DIR || './logs',
       MCP_LOG_FILE: process.env.MCP_LOG_FILE || 'mcp-mysql.log'
     };

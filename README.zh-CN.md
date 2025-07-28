@@ -42,6 +42,8 @@ export MYSQL_USER=root
 export MYSQL_PASSWORD=your_password
 export MYSQL_DATABASE=your_database
 export ALLOW_DDL=true
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
 ```
 
 ## 使用方法
@@ -95,7 +97,9 @@ npm run dev
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
-        "ALLOW_DDL": "true"
+        "ALLOW_DDL": "false",
+        "ALLOW_DROP": "false",
+        "ALLOW_DELETE": "false"
       }
     }
   }
@@ -119,7 +123,9 @@ npm run dev
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
-        "ALLOW_DDL": "true"
+        "ALLOW_DDL": "false",
+        "ALLOW_DROP": "false",
+        "ALLOW_DELETE": "false"
       }
     }
   }
@@ -213,7 +219,9 @@ npm run dev
 | MYSQL_USER | root | MySQL用户名 |
 | MYSQL_PASSWORD | | MySQL密码 |
 | MYSQL_DATABASE | | 数据库名 |
-| ALLOW_DDL | true | 是否允许DDL操作 |
+| ALLOW_DDL | false | 是否允许DDL操作（CREATE、ALTER、TRUNCATE、RENAME、COMMENT）。设置为'true'启用 |
+| ALLOW_DROP | false | 是否允许DROP操作。设置为'true'启用 |
+| ALLOW_DELETE | false | 是否允许DELETE操作。设置为'true'启用 |
 | MCP_LOG_DIR | ./logs | 日志目录 |
 | MCP_LOG_FILE | mcp-mysql.log | 日志文件名 |
 
@@ -248,7 +256,32 @@ export MYSQL_PORT=3306
 export MYSQL_USER=root
 export MYSQL_PASSWORD=your_password
 export MYSQL_DATABASE=your_database
+export ALLOW_DDL=false
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+```
+
+**权限控制示例：**
+```bash
+# 默认：禁用所有破坏性操作（安全模式）
+export ALLOW_DDL=false
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+
+# 允许DDL但禁用DROP和DELETE
 export ALLOW_DDL=true
+export ALLOW_DROP=false
+export ALLOW_DELETE=false
+
+# 允许所有操作但禁用DELETE
+export ALLOW_DDL=true
+export ALLOW_DROP=true
+export ALLOW_DELETE=false
+
+# 启用所有操作（谨慎使用）
+export ALLOW_DDL=true
+export ALLOW_DROP=true
+export ALLOW_DELETE=true
 ```
 
 ### 3. 运行服务器

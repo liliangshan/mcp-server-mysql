@@ -1,17 +1,18 @@
 {
   "name": "@liangshanli/mcp-server-mysql",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "description": "MCP MySQL server with DDL support, permission control and operation logs",
-  "main": "src/server-final.js",
+  "main": "bin/cli.js",
   "bin": {
     "mcp-server-mysql": "bin/cli.js"
   },
   "scripts": {
-    "start": "node src/server-final.js",
-    "dev": "node --inspect src/server-final.js",
+    "start": "node bin/cli.js",
+    "dev": "node --inspect bin/cli.js",
     "test": "node test-simple.js",
     "start-managed": "node start-server.js",
-    "daemon": "node start-server.js"
+    "daemon": "node start-server.js",
+    "server": "node src/server-final.js"
   },
   "keywords": [
     "mcp",

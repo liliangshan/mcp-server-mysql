@@ -84,6 +84,18 @@ const getDbConfig = () => ({
 });
 
 const ALLOW_DDL = process.env.ALLOW_DDL === 'true';
+const ALLOW_DROP = process.env.ALLOW_DROP === 'true';
+const ALLOW_DELETE = process.env.ALLOW_DELETE === 'true';
+
+// 启动日志
+console.error('=== MCP MySQL Server Starting ===');
+console.error(`Time: ${new Date().toISOString()}`);
+console.error(`Environment: ALLOW_DDL=${ALLOW_DDL}, ALLOW_DROP=${ALLOW_DROP}, ALLOW_DELETE=${ALLOW_DELETE}`);
+console.error(`Database: ${process.env.MYSQL_HOST || 'localhost'}:${process.env.MYSQL_PORT || '3306'}`);
+console.error(`User: ${process.env.MYSQL_USER || 'root'}`);
+console.error(`Database: ${process.env.MYSQL_DATABASE || 'default'}`);
+console.error(`Started via: ${process.argv[1]}`);
+console.error('================================');
 
 // Tool handlers - moved to class as methods
 
@@ -108,9 +120,24 @@ class FinalMCPServer {
       throw new Error('Missing sql parameter');
     }
 
-    const ddlRegex = /^(create|alter|drop|truncate|rename|comment)\s/i;
-    if (ddlRegex.test(sql.trim()) && !ALLOW_DDL) {
+    const sqlTrimmed = sql.trim();
+    
+    // Check DDL operations
+    const ddlRegex = /^(create|alter|truncate|rename|comment)\s/i;
+    if (ddlRegex.test(sqlTrimmed) && !ALLOW_DDL) {
       throw new Error('DDL operations are not allowed');
+    }
+    
+    // Check DROP operations
+    const dropRegex = /^drop\s/i;
+    if (dropRegex.test(sqlTrimmed) && !ALLOW_DROP) {
+      throw new Error('DROP operations are not allowed');
+    }
+    
+    // Check DELETE operations
+    const deleteRegex = /^delete\s/i;
+    if (deleteRegex.test(sqlTrimmed) && !ALLOW_DELETE) {
+      throw new Error('DELETE operations are not allowed');
     }
 
     // Ensure connection pool is available
@@ -157,6 +184,8 @@ class FinalMCPServer {
           port: getDbConfig().port,
           database: getDbConfig().database,
           allowDDL: ALLOW_DDL,
+          allowDrop: ALLOW_DROP,
+          allowDelete: ALLOW_DELETE,
         }
       };
     } catch (err) {
@@ -190,6 +219,33 @@ class FinalMCPServer {
       hasMore: offset + limit < operationLogs.length
     };
   }
+
+  // Check permissions for DDL, DROP, DELETE operations
+    async check_permissions(params) {
+    // Get environment variable configurations
+    const allowDDL = process.env.ALLOW_DDL === 'true';
+    const allowDrop = process.env.ALLOW_DROP === 'true';
+    const allowDelete = process.env.ALLOW_DELETE === 'true';
+
+    return {
+      allowDDL: allowDDL,
+      allowDrop: allowDrop,
+      allowDelete: allowDelete,
+      config: {
+        host: getDbConfig().host,
+        port: getDbConfig().port,
+        database: getDbConfig().database,
+        user: getDbConfig().user
+      },
+      environmentVariables: {
+        ALLOW_DDL: allowDDL,
+        ALLOW_DROP: allowDrop,
+        ALLOW_DELETE: allowDelete
+      }
+    };
+  }
+
+
 
   // Close connection pool
   async closeConnectionPool() {
@@ -266,11 +322,7 @@ class FinalMCPServer {
         throw new Error('Unsupported JSON-RPC version');
       }
 
-      // Check initialization status (except for initialize method itself)
-      if (method !== 'initialize' && !this.initialized) {
-        throw new Error('Server not initialized');
-      }
-
+      
       let result = null;
       let error = null;
 
@@ -373,8 +425,30 @@ class FinalMCPServer {
                     }
                   }
                 }
+              },
+              {
+                name: 'check_permissions',
+                description: 'Check database permissions for DDL, DROP, DELETE and other operations',
+                inputSchema: {
+                  type: 'object',
+                  properties: {}
+                }
+              },
+
+            ],
+            environment: {
+              ALLOW_DDL: ALLOW_DDL,
+              ALLOW_DROP: ALLOW_DROP,
+              ALLOW_DELETE: ALLOW_DELETE,
+              MYSQL_HOST: process.env.MYSQL_HOST || 'localhost',
+              MYSQL_PORT: process.env.MYSQL_PORT || '3306',
+              MYSQL_USER: process.env.MYSQL_USER || 'root',
+              MYSQL_DATABASE: process.env.MYSQL_DATABASE || '',
+              serverInfo: {
+                name: this.name,
+                version: this.version
               }
-            ]
+            }
           };
         } else if (method === 'prompts/list') {
           // Return empty prompts list since we don't provide prompts functionality
@@ -471,6 +545,7 @@ class FinalMCPServer {
             ]
           };
         } else if (method === 'ping') {
+          logRequest('ping', {}, { status: 'pong' }, null);
           result = { pong: true };
         } else if (method === 'shutdown') {
           // Handle shutdown request
@@ -683,9 +758,10 @@ class FinalMCPServer {
 
 // Start server
 async function main() {
+  console.error('Starting MCP MySQL server...');
   const server = new FinalMCPServer();
   await server.start();
-  
+  console.error('MCP MySQL server started successfully');
 }
 
 main().catch(error => {
