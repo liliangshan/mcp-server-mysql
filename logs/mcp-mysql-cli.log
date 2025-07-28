@@ -1,0 +1,10 @@
+2025-07-28T10:36:39.893Z | INFO | Starting MCP MySQL server from: E:\tools\mcptool\mcpmysql\src\server-final.js
+2025-07-28T10:36:39.897Z | INFO | Starting MCP MySQL server with environment: | {"MYSQL_HOST":"localhost","MYSQL_PORT":"3306","MYSQL_USER":"root","MYSQL_DATABASE":"","ALLOW_DDL":"true"}
+2025-07-28T10:36:39.979Z | INFO | MCP MySQL server process started with PID: 37472
+2025-07-28T10:36:52.116Z | INFO | Received SIGINT, shutting down server...
+2025-07-28T10:36:52.122Z | INFO | MCP MySQL server exited with code: null
+2025-07-28T14:33:18.345Z | INFO | Starting MCP MySQL server from: D:\mcpmysql\src\server-final.js
+2025-07-28T14:33:18.350Z | INFO | Starting MCP MySQL server with environment: | {"MYSQL_HOST":"localhost","MYSQL_PORT":"3306","MYSQL_USER":"root","MYSQL_DATABASE":"","ALLOW_DDL":"true"}
+2025-07-28T14:33:18.358Z | INFO | MCP MySQL server process started with PID: 7772
+2025-07-28T14:33:22.637Z | INFO | Received SIGINT, shutting down server...
+2025-07-28T14:33:22.663Z | INFO | MCP MySQL server exited with code: null
