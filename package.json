@@ -1,6 +1,6 @@
 {
   "name": "@liangshanli/mcp-server-mysql",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "MCP MySQL server with DDL support, permission control and operation logs",
   "main": "bin/cli.js",
   "bin": {

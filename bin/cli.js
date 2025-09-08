@@ -75,6 +75,7 @@ function startServer() {
     MYSQL_DATABASE: process.env.MYSQL_DATABASE || '',
     MCP_LOG_DIR: process.env.MCP_LOG_DIR || './logs',
     MCP_LOG_FILE: process.env.MCP_LOG_FILE || 'mcp-mysql.log',
+    MCP_DDL_LOG_FILE: process.env.MCP_DDL_LOG_FILE || 'ddl.sql',
   };
 
   writeLog('INFO', 'Starting MCP MySQL server with environment:', {
@@ -84,7 +85,8 @@ function startServer() {
     MYSQL_DATABASE: env.MYSQL_DATABASE,
     ALLOW_DDL: process.env.ALLOW_DDL,
     ALLOW_DROP: process.env.ALLOW_DROP,
-    ALLOW_DELETE: process.env.ALLOW_DELETE
+    ALLOW_DELETE: process.env.ALLOW_DELETE,
+    MCP_DDL_LOG_FILE: process.env.MCP_DDL_LOG_FILE || 'ddl.sql'
   });
 
   server = spawn('node', [serverPath], {

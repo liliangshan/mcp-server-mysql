@@ -2,6 +2,22 @@
 
 A MCP MySQL server with DDL support, permission control and operation logs.
 
+## Version History
+
+### v2.0.1 (Latest)
+- ✅ **DDL SQL Logging**: Added dedicated DDL SQL operation logging to `ddl.sql` file
+- ✅ **Success-Only Logging**: Only successful DDL operations are recorded to the SQL file
+- ✅ **Timestamped Entries**: Each DDL operation includes precise timestamp comments
+- ✅ **Auto-Formatting**: SQL statements are automatically formatted with semicolon endings
+- ✅ **New Tool**: Added `get_ddl_sql_logs` tool for querying DDL operation history
+- ✅ **Enhanced Logging**: Improved logging configuration with separate DDL log file support
+
+### v2.0.0
+- ✅ Initial release with DDL support
+- ✅ Permission control system
+- ✅ Operation logging
+- ✅ Connection pool management
+
 ## Features
 
 - ✅ SQL query execution (DDL and DML)
@@ -187,6 +203,35 @@ The server communicates with MCP clients via stdin/stdout after startup:
    }
    ```
 
+4. **get_ddl_sql_logs**: Get DDL SQL operation logs (v2.0.1+)
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 5,
+     "method": "tools/call",
+     "params": {
+       "name": "get_ddl_sql_logs",
+       "arguments": {
+         "limit": 50,
+         "offset": 0
+       }
+     }
+   }
+   ```
+
+5. **check_permissions**: Check database permissions
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 6,
+     "method": "tools/call",
+     "params": {
+       "name": "check_permissions",
+       "arguments": {}
+     }
+   }
+   ```
+
 ## Connection Pool Features
 
 - **Auto-creation**: Automatically creates connection pool on `notifications/initialized`
@@ -197,6 +242,7 @@ The server communicates with MCP clients via stdin/stdout after startup:
 
 ## Logging
 
+### General Logs
 Log file location: `./logs/mcp-mysql.log`
 
 Logged content:
@@ -204,6 +250,47 @@ Logged content:
 - SQL operation records
 - Error messages
 - Connection pool status changes
+
+### DDL SQL Logs (v2.0.1+)
+DDL log file location: `./logs/ddl.sql`
+
+Features:
+- **Success-Only Recording**: Only successful DDL operations are recorded
+- **Timestamped Entries**: Each operation includes precise timestamp comments
+- **Auto-Formatting**: SQL statements are automatically formatted with semicolon endings
+- **Executable Format**: Can be directly executed to recreate database structure
+
+Example DDL log format:
+```sql
+# 2024-01-15 14:23:45
+CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));
+# 2024-01-15 14:24:12
+ALTER TABLE users ADD COLUMN email VARCHAR(255);
+# 2024-01-15 14:25:33
+CREATE INDEX idx_email ON users(email);
+```
+
+#### DDL Logging Benefits
+
+**🔄 Database Synchronization**
+- **Production Sync**: Easily synchronize database schema changes from development to production environments
+- **Multi-Environment Deployment**: Apply the same DDL changes across staging, testing, and production databases
+- **Rollback Support**: Maintain a complete history of schema changes for easy rollback operations
+
+**📋 Development Workflow**
+- **Schema Versioning**: Track database evolution with timestamped change history
+- **Team Collaboration**: Share database structure changes with team members through executable SQL files
+- **Code Review**: Review database changes alongside application code changes
+
+**🛡️ Operational Excellence**
+- **Audit Trail**: Maintain comprehensive audit logs of all database structure modifications
+- **Compliance**: Meet regulatory requirements for database change tracking
+- **Disaster Recovery**: Quickly rebuild database structure from DDL logs in case of data loss
+
+**⚡ Performance & Reliability**
+- **Clean Execution**: Only successful operations are recorded, ensuring reliable script execution
+- **Error Prevention**: Failed operations are excluded, preventing script execution errors
+- **Automated Formatting**: Consistent SQL formatting reduces manual errors and improves readability
 
 ## Error Handling
 
@@ -225,6 +312,7 @@ Logged content:
 | ALLOW_DELETE | false | Whether to allow DELETE operations. Set to 'true' to enable |
 | MCP_LOG_DIR | ./logs | Log directory |
 | MCP_LOG_FILE | mcp-mysql.log | Log filename |
+| MCP_DDL_LOG_FILE | ddl.sql | DDL SQL log filename (v2.0.1+) |
 
 ## Development
 

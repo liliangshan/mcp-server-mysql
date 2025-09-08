@@ -4,16 +4,21 @@ const path = require('path');
 
 // In-memory log storage
 const operationLogs = [];
+const ddlSqlLogs = [];
 const MAX_LOGS = 1000;
+const MAX_DDL_LOGS = 500;
 
 // Get log directory and filename
 const getLogConfig = () => {
   const logDir = process.env.MCP_LOG_DIR || './logs';
   const logFile = process.env.MCP_LOG_FILE || 'mcp-mysql.log';
+  const ddlLogFile = process.env.MCP_DDL_LOG_FILE || 'ddl.sql';
   return {
     dir: logDir,
     file: logFile,
-    fullPath: path.join(logDir, logFile)
+    fullPath: path.join(logDir, logFile),
+    ddlFile: ddlLogFile,
+    ddlFullPath: path.join(logDir, ddlLogFile)
   };
 };
 
@@ -74,6 +79,48 @@ const logSqlOperation = (sql, result, error = null) => {
   }
 };
 
+// DDL SQL operation log recording function
+const logDdlSqlOperation = (sql, result, error = null) => {
+  const logEntry = {
+    id: Date.now(),
+    sql,
+    result: result ? JSON.stringify(result) : null,
+    error: error ? error.toString() : null,
+    created_at: new Date().toISOString()
+  };
+
+  // Add to in-memory DDL logs (both success and error)
+  ddlSqlLogs.unshift(logEntry);
+  if (ddlSqlLogs.length > MAX_DDL_LOGS) {
+    ddlSqlLogs.splice(MAX_DDL_LOGS);
+  }
+
+  // Only write successful DDL operations to SQL file
+  if (!error) {
+    try {
+      ensureLogDir();
+      const { ddlFullPath } = getLogConfig();
+      
+      // Add timestamp comment for each SQL statement
+      const now = new Date();
+      const timestamp = now.toISOString().replace('T', ' ').substring(0, 19);
+      const timeComment = `# ${timestamp}\n`;
+      
+      // Clean SQL statement and ensure it ends with semicolon
+      let cleanSql = sql.trim();
+      if (!cleanSql.endsWith(';')) {
+        cleanSql += ';';
+      }
+      
+      // Write timestamp comment and SQL statement to DDL file
+      fs.appendFileSync(ddlFullPath, timeComment + cleanSql + '\n', 'utf8');
+      
+    } catch (err) {
+      console.error('Failed to write DDL SQL file:', err.message);
+    }
+  }
+};
+
 // MySQL connection configuration
 const getDbConfig = () => ({
   host: process.env.MYSQL_HOST || 'localhost',
@@ -95,6 +142,10 @@ console.error(`Database: ${process.env.MYSQL_HOST || 'localhost'}:${process.env.
 console.error(`User: ${process.env.MYSQL_USER || 'root'}`);
 console.error(`Database: ${process.env.MYSQL_DATABASE || 'default'}`);
 console.error(`Started via: ${process.argv[1]}`);
+
+// 显示 DDL 日志配置
+const logConfig = getLogConfig();
+console.error(`DDL SQL Log File: ${logConfig.ddlFullPath}`);
 console.error('================================');
 
 // Tool handlers - moved to class as methods
@@ -124,7 +175,8 @@ class FinalMCPServer {
     
     // Check DDL operations
     const ddlRegex = /^(create|alter|truncate|rename|comment)\s/i;
-    if (ddlRegex.test(sqlTrimmed) && !ALLOW_DDL) {
+    const isDdlOperation = ddlRegex.test(sqlTrimmed);
+    if (isDdlOperation && !ALLOW_DDL) {
       throw new Error('DDL operations are not allowed');
     }
     
@@ -149,7 +201,13 @@ class FinalMCPServer {
       conn = await this.connectionPool.getConnection();
       const [result] = await conn.query(sql);
 
+      // Log SQL operation
       logSqlOperation(sql, result);
+      
+      // If it's a DDL operation, also log to DDL logs
+      if (isDdlOperation) {
+        logDdlSqlOperation(sql, result);
+      }
 
       return {
         result: result,
@@ -157,7 +215,14 @@ class FinalMCPServer {
         insertId: result.insertId,
       };
     } catch (err) {
+      // Log SQL operation error
       logSqlOperation(sql, null, err.message);
+      
+      // If it's a DDL operation, also log to DDL logs
+      if (isDdlOperation) {
+        logDdlSqlOperation(sql, null, err.message);
+      }
+      
       throw new Error(`SQL execution error: ${err.message}`);
     } finally {
       if (conn) conn.release();
@@ -217,6 +282,31 @@ class FinalMCPServer {
       limit: limit,
       offset: offset,
       hasMore: offset + limit < operationLogs.length
+    };
+  }
+
+  // Get DDL SQL operation logs
+  async get_ddl_sql_logs(params) {
+    const { limit = 50, offset = 0 } = params || {};
+
+    // Validate parameters
+    if (typeof limit !== 'number' || limit < 1 || limit > 500) {
+      throw new Error('limit parameter must be between 1-500');
+    }
+
+    if (typeof offset !== 'number' || offset < 0) {
+      throw new Error('offset parameter must be greater than or equal to 0');
+    }
+
+    // Return DDL logs from memory
+    const logs = ddlSqlLogs.slice(offset, offset + limit);
+
+    return {
+      logs: logs,
+      total: ddlSqlLogs.length,
+      limit: limit,
+      offset: offset,
+      hasMore: offset + limit < ddlSqlLogs.length
     };
   }
 
@@ -432,6 +522,23 @@ class FinalMCPServer {
                 inputSchema: {
                   type: 'object',
                   properties: {}
+                }
+              },
+              {
+                name: 'get_ddl_sql_logs',
+                description: 'Get DDL SQL operation logs',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    limit: {
+                      type: 'number',
+                      description: 'Limit count, default 50, max 500'
+                    },
+                    offset: {
+                      type: 'number',
+                      description: 'Offset, default 0'
+                    }
+                  }
                 }
               },
 
@@ -658,6 +765,7 @@ class FinalMCPServer {
     const logConfig = getLogConfig();
     console.error(`Log directory: ${logConfig.dir}`);
     console.error(`Log file: ${logConfig.fullPath}`);
+    console.error(`DDL SQL log file: ${logConfig.ddlFullPath}`);
 
     // Listen to stdin
     process.stdin.setEncoding('utf8');
