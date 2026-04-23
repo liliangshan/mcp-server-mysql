@@ -138,6 +138,8 @@ const getDbConfig = () => ({
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
   database: process.env.MYSQL_DATABASE || '',
+  bigNumberStrings: true,
+  supportBigNumbers: true,
 });
 
 const READONLY = process.env.READONLY === 'true';

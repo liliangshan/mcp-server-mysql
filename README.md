@@ -4,7 +4,10 @@ A MCP MySQL server with DDL support, permission control and operation logs.
 
 ## Version History
 
-### v3.0.0 (Latest)
+### v3.1.0 (Latest)
+- ✅ **BIGINT Precision Support**: Added `supportBigNumbers` and `bigNumberStrings` options to prevent precision loss for large integers (e.g., `order_id`, `user_id` > 2^53 - 1). Values are returned as strings to maintain full precision.
+
+### v3.0.0
 - ✅ **Readonly Mode**: Added `READONLY` environment variable - when enabled, only SELECT and SHOW commands are allowed (highest priority check)
 - ✅ **Tool Prefix Support**: Added `TOOL_PREFIX` environment variable for tool name isolation and config separation
 - ✅ **Project Branding**: Added `PROJECT_NAME` environment variable for custom tool descriptions
