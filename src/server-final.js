@@ -1,6 +1,8 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
+const { validateSql } = require('./sql-policy');
+const { version } = require('../package.json');
 
 // In-memory log storage
 const operationLogs = [];
@@ -132,8 +134,12 @@ const logDdlSqlOperation = (sql, result, error = null) => {
 };
 
 /**
- * Build shared MySQL settings while preserving BIGINT precision and optional TLS.
- * @returns {object} Connection settings derived from the process environment.
+ * Build connection settings shared by initial and replacement pools.
+ * connectTimeout limits connection establishment, not pool waits or query execution.
+ * TLS is opt-in through MYSQL_SSL=true and keeps certificate and hostname verification enabled.
+ * Preserve upstream BIGINT string handling to avoid precision loss for large identifiers.
+ * @returns {object} MySQL settings with optional verified TLS, a 60-second connection timeout
+ * and stacked statements disabled.
  */
 const getDbConfig = () => ({
   host: process.env.MYSQL_HOST || 'localhost',
@@ -143,7 +149,11 @@ const getDbConfig = () => ({
   database: process.env.MYSQL_DATABASE || '',
   bigNumberStrings: true,
   supportBigNumbers: true,
-  ...(process.env.MYSQL_SSL === 'true' && { ssl: {} })
+  connectTimeout: 60000,
+  multipleStatements: false,
+  ...(process.env.MYSQL_SSL === 'true' && {
+    ssl: { rejectUnauthorized: true, verifyIdentity: true }
+  }),
 });
 
 const READONLY = process.env.READONLY === 'true';
@@ -174,11 +184,16 @@ console.error('================================');
 
 // Tool handlers - moved to class as methods
 
-// Final MCP Server
+/**
+ * Serve MCP tools with SQL permission checks and guarded pooled database execution.
+ */
 class FinalMCPServer {
+  /**
+   * Initialize server state and report the same version as the installed package.
+   */
   constructor() {
     this.name = 'mysql-mcp-server';
-    this.version = '1.0.0';
+    this.version = version;
     this.initialized = false;
     this.connectionPool = null;
     this.keepAliveInterval = null;
@@ -187,56 +202,47 @@ class FinalMCPServer {
     this.maxRestarts = 5;
   }
 
-  // Execute SQL query
+  /**
+   * Validate one SQL statement and execute readonly requests in a read-only transaction.
+   * Roll back before returning a connection; destroy it if transaction cleanup fails.
+   * @param {{sql: string}} params SQL query arguments.
+   * @returns {Promise<object>} Query result and affected-row metadata.
+   * @throws {Error} If validation, database execution or transaction cleanup fails.
+   */
   async sql_query(params) {
-    const { sql } = params;
+    const { sql } = params || {};
+    const { isDdlOperation } = validateSql(sql, {
+      readonly: READONLY,
+      allowDDL: ALLOW_DDL,
+      allowDrop: ALLOW_DROP,
+      allowDelete: ALLOW_DELETE
+    });
 
-    if (!sql || typeof sql !== 'string') {
-      throw new Error('Missing sql parameter');
-    }
-
-    const sqlTrimmed = sql.trim();
-    
-    // Check readonly mode first (highest priority)
-    if (READONLY) {
-      const readonlyRegex = /^(select|show)\s/i;
-      if (!readonlyRegex.test(sqlTrimmed)) {
-        throw new Error('Readonly mode is enabled. Only SELECT and SHOW commands are allowed');
-      }
-    }
-    
-    // Check DDL operations
-    const ddlRegex = /^(create|alter|truncate|rename|comment)\s/i;
-    const isDdlOperation = ddlRegex.test(sqlTrimmed);
-    if (isDdlOperation && !ALLOW_DDL) {
-      throw new Error('DDL operations are not allowed');
-    }
-    
-    // Check DROP operations
-    const dropRegex = /^drop\s/i;
-    if (dropRegex.test(sqlTrimmed) && !ALLOW_DROP) {
-      throw new Error('DROP operations are not allowed');
-    }
-    
-    // Check DELETE operations
-    const deleteRegex = /^delete\s/i;
-    if (deleteRegex.test(sqlTrimmed) && !ALLOW_DELETE) {
-      throw new Error('DELETE operations are not allowed');
-    }
-
-    // Ensure connection pool is available
+    // Reject unsafe input before opening or checking any database connection.
     await this.ensureConnectionPool();
 
     let conn;
+    let transactionActive = false;
+    let reusable = true;
     try {
-      // Get connection from pool
       conn = await this.connectionPool.getConnection();
+      if (READONLY) {
+        // A setup failure must never fall back to an unguarded query.
+        reusable = false;
+        await conn.query('START TRANSACTION READ ONLY');
+        transactionActive = true;
+        reusable = true;
+      }
       const [result] = await conn.query(sql);
 
-      // Log SQL operation
+      if (transactionActive) {
+        reusable = false;
+        await conn.rollback();
+        transactionActive = false;
+        reusable = true;
+      }
+
       logSqlOperation(sql, result);
-      
-      // If it's a DDL operation, also log to DDL logs
       if (isDdlOperation) {
         logDdlSqlOperation(sql, result);
       }
@@ -247,17 +253,24 @@ class FinalMCPServer {
         insertId: result.insertId,
       };
     } catch (err) {
-      // Log SQL operation error
       logSqlOperation(sql, null, err.message);
-      
-      // If it's a DDL operation, also log to DDL logs
       if (isDdlOperation) {
         logDdlSqlOperation(sql, null, err.message);
       }
-      
       throw new Error(`SQL execution error: ${err.message}`);
     } finally {
-      if (conn) conn.release();
+      if (conn) {
+        if (transactionActive && reusable) {
+          try {
+            await conn.rollback();
+          } catch (err) {
+            reusable = false;
+            logSqlOperation(sql, null, `Readonly rollback failed: ${err.message}`);
+          }
+        }
+        if (reusable) conn.release();
+        else conn.destroy();
+      }
     }
   }
 
@@ -432,7 +445,11 @@ class FinalMCPServer {
     }
   }
 
-  // Recreate connection pool if needed
+  /**
+   * Recreate an unavailable or unhealthy pool using the shared MySQL connection settings.
+   * @returns {Promise<void>} Resolves after the pool passes its initial health check.
+   * @throws {Error} If pool creation or the initial connection check fails.
+   */
   async ensureConnectionPool() {
     if (!this.connectionPool || !(await this.checkConnectionPoolHealth())) {
       console.error('Recreating database connection pool...');
@@ -442,10 +459,7 @@ class FinalMCPServer {
         this.connectionPool = mysql.createPool({
           ...getDbConfig(),
           connectionLimit: 10,
-          acquireTimeout: 60000,
-          timeout: 60000,
-          queueLimit: 0,
-          ssl: {}
+          queueLimit: 0
         });
         
         // Test connection pool
@@ -467,7 +481,11 @@ class FinalMCPServer {
     }
   }
 
-  // Handle JSON-RPC requests
+  /**
+   * Dispatch JSON-RPC requests and initialize pools with the shared connection settings.
+   * @param {object} request Incoming JSON-RPC request or notification.
+   * @returns {Promise<object|null>} A JSON-RPC result or error, or null for notifications.
+   */
   async handleRequest(request) {
     try {
       const { jsonrpc, id, method, params } = request;
@@ -759,10 +777,7 @@ class FinalMCPServer {
             this.connectionPool = mysql.createPool({
               ...getDbConfig(),
               connectionLimit: 10,
-              acquireTimeout: 60000,
-              timeout: 60000,
-              queueLimit: 0,
-              ssl: {}
+              queueLimit: 0
             });
             
             // Test connection pool
@@ -952,7 +967,10 @@ class FinalMCPServer {
   }
 }
 
-// Start server
+/**
+ * Start the stdio MCP server when this module is used as the executable entry point.
+ * @returns {Promise<void>}
+ */
 async function main() {
   console.error('Starting MCP MySQL server...');
   const server = new FinalMCPServer();
@@ -960,9 +978,13 @@ async function main() {
   console.error('MCP MySQL server started successfully');
 }
 
-main().catch(error => {
-  console.error(error);
-  // Write to log
-  logRequest('main', { error: error.message, stack: error.stack }, null, error.message);
-  process.exit(1);
-}); 
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error);
+    // Write to log
+    logRequest('main', { error: error.message, stack: error.stack }, null, error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { FinalMCPServer };

@@ -4,7 +4,16 @@
 
 ## 版本历史
 
-### v3.1.0 (最新版本)
+### v3.2.0 (最新版本)
+- ✅ **只读保护加固**：检查完整 SQL，并使用只读事务阻止 SELECT 间接写入及危险语法。
+- ✅ **可选 TLS**：`MYSQL_SSL=true` 启用证书和主机名校验，不再强制已有非 TLS 连接开启加密。
+- ✅ **连接配置修复**：用有效的 `connectTimeout` 替换不支持的超时选项，初始化与重建连接池共享配置。
+- ✅ **回归测试**：新增 SQL 权限、连接生命周期、TLS 配置及版本一致性测试。
+
+### v3.1.1
+- ✅ **Claude 技能支持**：新增 `SKILL.md`，用于 Claude 集成。
+
+### v3.1.0
 - ✅ **BIGINT 精度支持**：新增 `supportBigNumbers` 和 `bigNumberStrings` 选项，防止大整数（如 `order_id`、`user_id` > 2^53 - 1）精度丢失。大数值将以字符串形式返回，确保完整精度。
 
 ### v3.0.0
@@ -82,6 +91,12 @@ export TOOL_PREFIX="projA"
 export PROJECT_NAME="MyProject"
 ```
 
+### SSL/TLS 连接
+
+仅当 `MYSQL_SSL=true` 时启用 TLS。未设置或设置为 `false` 时保持非 TLS 连接。初始化和重建连接池使用相同配置；开启 TLS 后，握手或证书验证失败不会自动降级为明文连接。
+
+TLS 会校验证书信任链及服务器主机名。`MYSQL_HOST` 请使用与证书匹配的数据库域名。私有 CA 或自签名 CA 场景，可在 MCP 进程环境中设置 `NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem`，必须在 **Node.js 启动前**设置，并重启服务。CLI 和托管启动均会继承这些环境变量。不要通过关闭证书校验来绕过信任错误。
+
 ## 使用方法
 
 ### 1. 全局安装后直接运行
@@ -133,6 +148,7 @@ npm run dev
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
+        "MYSQL_SSL": "false",
         "READONLY": "false",
         "ALLOW_DDL": "false",
         "ALLOW_DROP": "false",
@@ -162,6 +178,7 @@ npm run dev
         "MYSQL_USER": "your_user",
         "MYSQL_PASSWORD": "your_password",
         "MYSQL_DATABASE": "your_database",
+        "MYSQL_SSL": "false",
         "READONLY": "false",
         "ALLOW_DDL": "false",
         "ALLOW_DROP": "false",
@@ -322,6 +339,20 @@ npm run dev
    }
    ```
 
+## 只读模式的安全边界
+
+`READONLY=true` 优先于所有 `ALLOW_*` 配置。只读请求只接受单条 `SELECT` 或 `SHOW`，并在同一连接的 `START TRANSACTION READ ONLY` 事务中执行；成功或失败后都会回滚。事务开启失败时不会执行用户 SQL，回滚失败的连接会被销毁而不是放回连接池。
+
+- 全部模式显式禁用多语句，并在连接数据库前检查完整 SQL。允许末尾的一个分号，字符串和普通注释中的分号不会被当作语句分隔符。
+- 拒绝 MySQL `/*! ... */` 和 MariaDB `/*M! ... */` 可执行注释；普通注释不影响语句类型判断，因此不能再通过前置注释绕过 DDL、DROP、DELETE 检查。
+- 只读模式拒绝 `SELECT ... INTO OUTFILE/DUMPFILE`、`INTO @变量`、`:=` 赋值、`FOR UPDATE/SHARE`、`LOCK IN SHARE MODE` 和获取/释放命名锁的函数。
+- 不同 `sql_mode` 对引号和反斜杠的解释不同；不能在所有支持的解释下安全校验的 SQL 会被保守拒绝。只读模式仍不接受 `WITH`、`EXPLAIN`、`CALL` 等其他起始命令。
+- 单语句校验采用保守策略，不接受含内部分号的存储过程/函数定义等复合脚本；需要执行此类脚本时，请使用独立的受控迁移工具。
+
+**应用层检查不能替代数据库权限。** 只读事务用于进一步阻止 SELECT 调用存储函数时修改普通表，但不是任意 UDF、外部副作用或临时表操作的完整沙箱。生产环境应使用专用的最小权限账号，只授予需要的查询和元数据读取权限，不授予写入、DDL、`FILE`、不必要的 `EXECUTE` 等权限，不要使用 `root` 作为只读账号。
+
+修改后需重启实际使用的 MCP 服务。运行 `npx @liangshanli/mcp-server-mysql` 不会自动使用本地源码修改，需指向本地 `bin/cli.js` 或安装包含修复的版本。
+
 ## 连接池特性
 
 - **自动创建**: 在`notifications/initialized`时自动创建连接池
@@ -397,7 +428,8 @@ CREATE INDEX idx_email ON users(email);
 | MYSQL_USER | root | MySQL用户名 |
 | MYSQL_PASSWORD | | MySQL密码 |
 | MYSQL_DATABASE | | 数据库名 |
-| MYSQL_SSL | false | 如果设置为'true'，启用与MySQL服务器的SSL连接 |
+| MYSQL_SSL | false | 仅设置为'true'时启用 TLS，并校验证书和主机名；初始化与重建连接池均使用此设置 |
+| NODE_EXTRA_CA_CERTS | | 可选，私有或自签名 CA 的 PEM 文件绝对路径；Node.js 在进程启动时读取 |
 | READONLY | false | 如果设置为'true'，只允许执行SELECT和SHOW命令。此检查具有最高优先级，会覆盖所有其他权限设置 |
 | ALLOW_DDL | false | 是否允许DDL操作（CREATE、ALTER、TRUNCATE、RENAME、COMMENT）。设置为'true'启用 |
 | ALLOW_DROP | false | 是否允许DROP操作。设置为'true'启用 |

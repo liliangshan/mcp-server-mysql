@@ -4,7 +4,16 @@ A MCP MySQL server with DDL support, permission control and operation logs.
 
 ## Version History
 
-### v3.1.0 (Latest)
+### v3.2.0 (Latest)
+- ✅ **Readonly Hardening**: Validate complete statements and use read-only transactions to block write-through SELECT queries and unsafe SQL forms.
+- ✅ **Optional TLS**: `MYSQL_SSL=true` enables certificate and hostname verification without forcing TLS on existing non-TLS connections.
+- ✅ **Connection Configuration**: Replace unsupported timeout options with `connectTimeout`; initial and replacement pools share the same settings.
+- ✅ **Regression Coverage**: Add SQL policy, connection lifecycle, TLS configuration and version consistency tests.
+
+### v3.1.1
+- ✅ **Claude Skill Support**: Added `SKILL.md` for Claude integration.
+
+### v3.1.0
 - ✅ **BIGINT Precision Support**: Added `supportBigNumbers` and `bigNumberStrings` options to prevent precision loss for large integers (e.g., `order_id`, `user_id` > 2^53 - 1). Values are returned as strings to maintain full precision.
 
 ### v3.0.0
@@ -81,6 +90,12 @@ export TOOL_PREFIX="projA"
 # Optional: Project branding
 export PROJECT_NAME="MyProject"
 ```
+
+### SSL/TLS connections
+
+Only `MYSQL_SSL=true` enables TLS. Leaving it unset or setting it to `false` preserves non-TLS connections. The same setting applies when the pool is initialized or rebuilt; an enabled TLS connection never retries without TLS after a handshake or certificate failure.
+
+TLS verifies the certificate chain and server hostname. Use the database DNS name matching its certificate as `MYSQL_HOST`. For a private or self-signed CA, set `NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem` in the MCP process environment **before starting Node.js** and restart the service. CLI and managed launches inherit these environment variables. Do not disable certificate validation to work around trust errors.
 
 ## Usage
 
@@ -324,6 +339,20 @@ The server communicates with MCP clients via stdin/stdout after startup:
    }
    ```
 
+## Readonly Security Boundary
+
+`READONLY=true` takes priority over every `ALLOW_*` flag. Readonly requests accept only a single `SELECT` or `SHOW` and execute inside `START TRANSACTION READ ONLY` on the same connection. The transaction is rolled back after success or failure. If transaction setup fails, client SQL is not executed; a connection whose rollback fails is destroyed instead of returned to the pool.
+
+- All modes explicitly disable multiple statements and validate the entire SQL before database access. One trailing semicolon is allowed; semicolons inside quoted text or ordinary comments are not statement separators.
+- MySQL `/*! ... */` and MariaDB `/*M! ... */` executable comments are rejected. Ordinary leading comments cannot bypass DDL, DROP or DELETE checks.
+- Readonly mode rejects `SELECT ... INTO OUTFILE/DUMPFILE`, `INTO @variable`, `:=` assignments, `FOR UPDATE/SHARE`, `LOCK IN SHARE MODE`, and functions that acquire or release advisory locks.
+- Quote and backslash interpretation varies with `sql_mode`; input that cannot be validated safely under all supported interpretations is rejected conservatively. Readonly mode still rejects commands starting with `WITH`, `EXPLAIN`, `CALL`, or other non-allowlisted commands.
+- Single-statement validation conservatively rejects compound scripts such as stored routine definitions containing internal semicolons. Use a separate controlled migration tool for those scripts.
+
+**Application checks do not replace database privileges.** Read-only transactions additionally guard against stored functions modifying regular tables, but are not a complete sandbox for arbitrary UDFs, external side effects, or temporary-table operations. In production, use a dedicated least-privilege account with only the required query and metadata privileges, without write, DDL, `FILE`, or unnecessary `EXECUTE` privileges. Do not use `root` for readonly access.
+
+Restart the actual MCP service after updating. Running `npx @liangshanli/mcp-server-mysql` does not automatically use local source changes; point the client at the local `bin/cli.js` or install a version containing the fix.
+
 ## Connection Pool Features
 
 - **Auto-creation**: Automatically creates connection pool on `notifications/initialized`
@@ -399,7 +428,8 @@ CREATE INDEX idx_email ON users(email);
 | MYSQL_USER | root | MySQL username |
 | MYSQL_PASSWORD | | MySQL password |
 | MYSQL_DATABASE | | Database name |
-| MYSQL_SSL | false | If set to 'true', enables SSL connection to MySQL server |
+| MYSQL_SSL | false | Set exactly to 'true' to enable TLS with certificate and hostname verification; shared by initial and replacement pools |
+| NODE_EXTRA_CA_CERTS | | Optional absolute path to a PEM CA file for private/self-signed CAs; read by Node.js at process startup |
 | READONLY | false | If set to 'true', only SELECT and SHOW commands are allowed. This check has the highest priority and overrides all other permission settings |
 | ALLOW_DDL | false | Whether to allow DDL operations (CREATE, ALTER, TRUNCATE, RENAME, COMMENT). Set to 'true' to enable |
 | ALLOW_DROP | false | Whether to allow DROP operations. Set to 'true' to enable |
