@@ -131,7 +131,10 @@ const logDdlSqlOperation = (sql, result, error = null) => {
   }
 };
 
-// MySQL connection configuration
+/**
+ * Build shared MySQL settings while preserving BIGINT precision and optional TLS.
+ * @returns {object} Connection settings derived from the process environment.
+ */
 const getDbConfig = () => ({
   host: process.env.MYSQL_HOST || 'localhost',
   port: process.env.MYSQL_PORT ? parseInt(process.env.MYSQL_PORT) : 3306,
@@ -140,6 +143,7 @@ const getDbConfig = () => ({
   database: process.env.MYSQL_DATABASE || '',
   bigNumberStrings: true,
   supportBigNumbers: true,
+  ...(process.env.MYSQL_SSL === 'true' && { ssl: {} })
 });
 
 const READONLY = process.env.READONLY === 'true';
@@ -440,7 +444,8 @@ class FinalMCPServer {
           connectionLimit: 10,
           acquireTimeout: 60000,
           timeout: 60000,
-          queueLimit: 0
+          queueLimit: 0,
+          ssl: {}
         });
         
         // Test connection pool
@@ -756,7 +761,8 @@ class FinalMCPServer {
               connectionLimit: 10,
               acquireTimeout: 60000,
               timeout: 60000,
-              queueLimit: 0
+              queueLimit: 0,
+              ssl: {}
             });
             
             // Test connection pool
